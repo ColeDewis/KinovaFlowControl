@@ -17,15 +17,12 @@ if __name__ == "__main__":
 
     # terminals for the simulation to start
 
-    # TODO dynamic dataset naming
     terminals = {
         "rqt": "rqt --perspective-file /home/user/kinova_flow/startup/rqt.perspective",
         "kortex_bringup": "roslaunch kortex_bringup kortex_bringup.launch",
         "cameras": "roslaunch --wait cameras single_rs.launch",
         "joynode": 'rosparam set joy_node/dev "/dev/input/js0"\nrosrun joy joy_node',
         "kortex_joy": "rosrun joystick_control kinova_joy.py _controller:=cartesian",
-        "recorder": "rosrun recorder record.py test_dataset",
-        # "recorder": f"echo 'rosrun recorder recorder.py _output_dir:={output_dir}'",
     }
 
     for name, cmd in terminals.items():

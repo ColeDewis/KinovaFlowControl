@@ -21,6 +21,10 @@
         <arg name="depth_fps"              value="15"/>
         <arg name="publish_tf"            value="$(arg publish_tf)"/>
         <arg name="filters"              value="pointcloud"/>
+        <arg name="decimation_filter"      value="true"/>
+        <arg name="spatial_filter"        value="true"/>
+        <arg name="temporal_filter"       value="true"/>
+        <arg name="hole_filling_filter"   value="true"/>
       </include>
     </group>
   </launch>
