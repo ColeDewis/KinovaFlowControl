@@ -1,0 +1,6 @@
+libtmux
+conan==1.59
+pyrealsense2
+numpy==1.24.4
+matplotlib==3.7.5
+cython<3

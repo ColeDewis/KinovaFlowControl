@@ -1,0 +1,10 @@
+catkin_ws/build
+catkin_ws/devel
+catkin_ws/install
+.vscode
+.catkin_workspace
+__pycache__
+*.pkl
+*.png
+data/
+catkin_ws/src/VOSA/

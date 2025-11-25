@@ -1,0 +1,25 @@
+version: "3.8"
+services:
+  kinova_flow:
+    container_name: kinova_flow
+    working_dir: /home/user/kinova_flow
+    build:
+      context: .
+      dockerfile: Dockerfile
+      network: host
+    network_mode: host
+    tty: true
+    privileged: true
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - DISPLAY=${DISPLAY}
+    volumes:
+      - ../KinovaFlow:/home/user/kinova_flow
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - /dev/bus/usb:/dev/bus/usb
