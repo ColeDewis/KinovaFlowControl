@@ -766,7 +766,9 @@ class xbox_control(KinovaGen3):
         self.run = True
         self.prev_cv_cmd = np.zeros(6)
         self.joint_velocities = np.zeros(6)
-        self.home_array = np.array([0.1, 65, -179.9, -120, 0, 100, 90])
+        # self.home_array = np.array([0.1, 65, -179.9, -120, 0, 100, 90])
+        self.home_array = np.array([0.16498429426900835, 0.5616066117275827, -3.121053556314775, -2.2368222890711777, 0.17632266932050708, 1.2174474475729107, -1.6740721159715148])
+        self.home_array = np.rad2deg(self.home_array)
         self.z_dim = 6
 
     def step(self, ax, mode):

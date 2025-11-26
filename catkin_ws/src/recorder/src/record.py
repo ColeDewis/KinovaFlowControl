@@ -22,6 +22,7 @@ from kortex_driver.msg._BaseCyclic_Feedback import BaseCyclic_Feedback
 from sensor_msgs.msg import Image, JointState, Joy, PointCloud2
 from std_msgs.msg import Float64, Int16
 from tqdm import tqdm
+import ros_numpy
 
 bridge = CvBridge()
 
@@ -46,12 +47,12 @@ class Recorder:
         image_sub = message_filters.Subscriber('/camera1/color/image_raw', Image)
         pointcloud_sub = message_filters.Subscriber('/camera1/depth/color/points', PointCloud2)
 
-        ts = message_filters.ApproximateTimeSynchronizer([joints_sub, tool_sub, pointcloud_sub, image_sub], 100, slop=0.5)
+        ts = message_filters.ApproximateTimeSynchronizer([joints_sub, tool_sub, pointcloud_sub, image_sub], allow_headerless=True, queue_size=100, slop=0.5)
         ts.registerCallback(self.syncCallback)
 
         # desyncing check setup
         self.last_sync_time = rospy.Time.now()
-        self.sync_timeout = rospy.Duration(1.0)
+        self.sync_timeout = rospy.Duration(1.5)
         rospy.Timer(rospy.Duration(0.5), self.checkDesync)
 
         # keyboard setup
@@ -84,17 +85,25 @@ class Recorder:
             return
        
         try:
-            # numpy_pc = np.column_stack([ros_numpy.numpify(depth)[f] for f in ("x", "y", "z", "rgb")])
+            numpy_pc = ros_numpy.point_cloud2.pointcloud2_to_array(pointcloud_msg)
+            xyz = ros_numpy.point_cloud2.get_xyz_points(numpy_pc, remove_nans=True)
+            rgb_packed = numpy_pc['rgb'].view(np.uint32)
+            r = (rgb_packed >> 16) & 255
+            g = (rgb_packed >> 8) & 255
+            b = rgb_packed & 255
+            rgb = np.stack([r, g, b], axis=-1).astype(np.uint8)
+            points = np.concatenate([xyz, rgb], axis=-1)
+
             cv_image = bridge.imgmsg_to_cv2(img_msg, desired_encoding='bgr8')
             self.curr_rgb.append(cv_image)
-            self.curr_depth.append(pointcloud_msg)
+            self.curr_depth.append(points)
 
-            joint_msg.position[8] = 0.0 if joint_msg.position[8] < 0.5 else 1.0
+            gripper_pos = 0.0 if joint_msg.position[8] < 0.1 else 1.0
             data = {
                 # clip joints to only the main 7DOF
                 # I believe gripper is 8, should verify
                 'joints': {
-                    'position': joint_msg.position[:8],
+                    'position': np.concatenate([joint_msg.position[:7], [gripper_pos]]),
                     'velocity': joint_msg.velocity[:7],
                 },
                 'cartesian': {
@@ -125,9 +134,9 @@ class Recorder:
         now = rospy.Time.now()
         time_since_last_sync = now - self.last_sync_time
 
-        if time_since_last_sync > self.sync_timeout:
+        if time_since_last_sync > self.sync_timeout and hasattr(self, "curr_low_dim"):
             rospy.logwarn("Desynced, cancelling episode. Press space to rerun or q to exit")
-            self._call_clear_faults()
+            # self._call_clear_faults()
 
     def joy_callback(self, msg):
         self.buttons = msg.buttons
@@ -203,12 +212,12 @@ class Recorder:
 
         # create episode folder
         current_folder = os.path.join(self.base_path, str(self.episode_num))
-        os.makedirs(current_folder)
+        os.makedirs(current_folder, exist_ok=True)
 
         for i, idx in enumerate(tqdm([i for i in range(len(self.curr_low_dim))], desc="Saving frames")):
             # save each frame
             frame_folder = os.path.join(current_folder, str(i))
-            os.makedirs(frame_folder)
+            os.makedirs(frame_folder, exist_ok=True)
             np.save(os.path.join(frame_folder, "low_dim.npy"), self.curr_low_dim[idx])
             np.save(os.path.join(frame_folder, "rgb.npy"), self.curr_rgb[idx])
             # TODO calibrate extrinsics...

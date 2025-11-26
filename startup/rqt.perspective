@@ -69,7 +69,7 @@
                   "type": "repr"
                 },
                 "mouse_pub_topic": {
-                  "repr": "'/visual_servoing/debug_focus_mouse_left'",
+                  "repr": "'/camera1/color/image_raw_mouse_left'",
                   "type": "repr"
                 },
                 "num_gridlines": {
@@ -93,7 +93,7 @@
                   "type": "repr"
                 },
                 "topic": {
-                  "repr": "'/visual_servoing/debug_focus'",
+                  "repr": "'/camera1/color/image_raw'",
                   "type": "repr"
                 },
                 "zoom1": {
@@ -140,7 +140,7 @@
                   "type": "repr"
                 },
                 "mouse_pub_topic": {
-                  "repr": "'/visual_servoing/debug_tracking_mouse_left'",
+                  "repr": "'/camera1/depth/image_rect_raw_mouse_left'",
                   "type": "repr"
                 },
                 "num_gridlines": {
@@ -164,7 +164,7 @@
                   "type": "repr"
                 },
                 "topic": {
-                  "repr": "'/visual_servoing/debug_tracking'",
+                  "repr": "'/camera1/depth/image_rect_raw'",
                   "type": "repr"
                 },
                 "zoom1": {

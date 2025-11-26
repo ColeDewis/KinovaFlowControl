@@ -48,19 +48,20 @@ def gen_iris(base, xbox=False):
             #         # -1.6477009622253327] # TODO this gets ignored not sure why
             #     )
             # )
-            self.home_array = np.rad2deg(
-                np.array(
-                    [
-                        0.012327630165246581,
-                        0.9606400220790603,
-                        3.129544779134384,
-                        -2.072680219496908,
-                        -0.004924717487774011,
-                        1.5311032423278106,
-                        -1.5944846120589338,
-                    ]
-                )
-            )
+            # self.home_array = np.rad2deg(
+            #     np.array(
+            #         [
+            #             0.012327630165246581,
+            #             0.9606400220790603,
+            #             3.129544779134384,
+            #             -2.072680219496908,
+            #             -0.004924717487774011,
+            #             1.5311032423278106,
+            #             -1.5944846120589338,
+            #         ]
+            #     )
+            # )
+            self.home_array = np.rad2deg(np.array([0.16498429426900835, 0.5616066117275827, -3.121053556314775, -2.2368222890711777, 0.17632266932050708, 1.2174474475729107, -1.6740721159715148]))
             self.send_joint_angles(self.home_array)  # sends robot home
             self.window_center = (424, 240)
             self.grip_center = None
@@ -141,6 +142,7 @@ def gen_iris(base, xbox=False):
                 self.run = False
                 self.send_joint_speeds_command(np.zeros(7))
                 self.send_joint_angles(self.home_array)
+                self.send_gripper_command(0.0)
                 rospy.loginfo("Start button pressed: sending robot to starting position")
                 self.run = True
 

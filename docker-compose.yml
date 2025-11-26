@@ -20,6 +20,6 @@ services:
     environment:
       - DISPLAY=${DISPLAY}
     volumes:
-      - ../KinovaFlow:/home/user/kinova_flow
+      - ../KinovaFlowControl:/home/user/kinova_flow
       - /tmp/.X11-unix:/tmp/.X11-unix
       - /dev/bus/usb:/dev/bus/usb

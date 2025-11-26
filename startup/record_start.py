@@ -29,10 +29,13 @@ if __name__ == "__main__":
     # terminals for the simulation to start
 
     dataset_folder = "/home/user/kinova_flow/data/"
+    if not path.exists(dataset_folder):
+        os.makedirs(dataset_folder)
     dataset_name = get_next_output_dir(dataset_folder)
 
     terminals = {
         "rqt": "rqt --perspective-file /home/user/kinova_flow/startup/rqt.perspective",
+        "rviz": "rviz -d /home/user/kinova_flow/startup/conf.rviz",
         "kortex_bringup": "roslaunch kortex_bringup kortex_bringup.launch",
         "cameras": "roslaunch --wait cameras single_rs.launch",
         "joynode": 'rosparam set joy_node/dev "/dev/input/js0"\nrosrun joy joy_node',
