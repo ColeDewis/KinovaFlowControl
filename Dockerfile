@@ -63,6 +63,8 @@ RUN cd 3D-Diffusion-Policy/third_party && \
 RUN cd 3D-Diffusion-Policy/visualizer && \
     pip install .
 
+RUN pip install huggingface_hub=0.25.0
+
 # cuda stuff for torch3d
 ARG CUDA_MAJOR_VERSION=12
 ARG CUDA_VERSION=12.1
