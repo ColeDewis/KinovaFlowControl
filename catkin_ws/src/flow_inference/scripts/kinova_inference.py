@@ -14,7 +14,7 @@ from sensor_msgs.msg import Image, JointState, PointCloud2
 
 class FlowInference:
     def __init__(self):
-        # self.robot = KinovaGen3()
+        self.robot = KinovaGen3()
 
         pc_subscriber = message_filters.Subscriber(
             "/camera1/depth/color/points", PointCloud2
@@ -26,31 +26,31 @@ class FlowInference:
         #     "/camera1/color/image_raw", Image
         # )
 
-        ts = message_filters.ApproximateTimeSynchronizer(
-            [joints_subscriber, pc_subscriber], queue_size=10, slop=0.5
-        )
-        ts.registerCallback(self.infer_callback)
-
         self.states = []
         self.pointclouds = []
         self.obs_window_size = 2
-        self.action_horizon = 4
+        self.action_horizon = 8
 
         self.model_workspace = TrainDP3Workspace.create_from_checkpoint("/home/user/kinova_flow/data/ckpts/epoch=2800-test_mean_score=-0.019.ckpt")
         self.model_workspace.model.cuda()
 
+
+        ts = message_filters.ApproximateTimeSynchronizer(
+            [joints_subscriber, pc_subscriber], queue_size=10, slop=0.5
+        )
+        ts.registerCallback(self.infer_callback)
         # for testing, create dummy input
 
-        dummy_state = np.array([np.random.rand(self.obs_window_size, 8).astype(np.float32)])
-        dummy_pc = np.array([np.random.rand(2, 1024, 6).astype(np.float32)])
+        # dummy_state = np.array([np.random.rand(self.obs_window_size, 8).astype(np.float32)])
+        # dummy_pc = np.array([np.random.rand(2, 1024, 6).astype(np.float32)])
 
-        dummy_data = {
-            "agent_pos": torch.from_numpy(dummy_state).cuda(),
-            "point_cloud": torch.from_numpy(dummy_pc).cuda()
-        }
+        # dummy_data = {
+        #     "agent_pos": torch.from_numpy(dummy_state).cuda(),
+        #     "point_cloud": torch.from_numpy(dummy_pc).cuda()
+        # }
 
-        self.model_inference(dummy_data)
-        exit()
+        # self.model_inference(dummy_data)
+        # exit()
 
     def infer_callback(self, joint_msg, pc_msg):
         numpy_pc = ros_numpy.point_cloud2.pointcloud2_to_array(pc_msg)
@@ -67,21 +67,23 @@ class FlowInference:
         joints = np.concatenate([joint_msg.position[:7], [gripper_pos]])
 
         self.states.append(joints)
-        self.pointclouds.append(points)
+        self.pointclouds.append(preprocess_point_cloud(points))
         if len(self.states) > self.obs_window_size:
             self.states.pop(0)
             self.pointclouds.pop(0)
         elif len(self.states) < self.obs_window_size:
             return
         
-        state_input = np.concatenate(self.states, axis=0)
-        pc_input = np.stack(self.pointclouds, axis=0)  # (obs_window_size, N, 6)
+        state_input = np.array(self.states)
+        pc_input = np.array(self.pointclouds)  # (obs_window_size, N, 6)
 
         self.model_workspace.model.eval()
         data = {
-            "agent_pos": np.array(state_input, dtype=np.float32),
-            "point_cloud": np.array(pc_input, dtype=np.float32)
+            "agent_pos": torch.from_numpy(state_input).unsqueeze(0).cuda(), 
+            "point_cloud": torch.from_numpy(pc_input).unsqueeze(0).cuda()
         }
+
+        rospy.loginfo(f"{data['agent_pos'].shape}, {data['point_cloud'].shape}")
 
         self.model_inference(data)
         
@@ -91,7 +93,8 @@ class FlowInference:
             action_seq = self.model_workspace.model.predict_action(data)
             action = action_seq['action']
 
-            rospy.loginfo(f"Predicted action sequence: {action}")
+            rounded_action = torch.round(action * 100) / 100
+            rospy.loginfo(f"Predicted action sequence: {rounded_action}")
 
 
 if __name__ == "__main__":

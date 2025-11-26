@@ -19,6 +19,7 @@ if __name__ == "__main__":
 
     terminals = {
         "rqt": "rqt --perspective-file /home/user/kinova_flow/startup/rqt.perspective",
+        "rviz": "rviz -d /home/user/kinova_flow/startup/conf.rviz",
         "kortex_bringup": "roslaunch kortex_bringup kortex_bringup.launch",
         "cameras": "roslaunch --wait cameras single_rs.launch",
         "joynode": 'rosparam set joy_node/dev "/dev/input/js0"\nrosrun joy joy_node',
