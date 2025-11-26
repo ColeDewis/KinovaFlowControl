@@ -14,7 +14,9 @@ from sensor_msgs.msg import Image, JointState, PointCloud2
 
 class FlowInference:
     def __init__(self):
-        self.robot = KinovaGen3()
+        # self.robot = KinovaGen3()
+
+        rospy.on_shutdown(self.stop_robot)
 
         pc_subscriber = message_filters.Subscriber(
             "/camera1/depth/color/points", PointCloud2
@@ -30,6 +32,7 @@ class FlowInference:
         self.pointclouds = []
         self.obs_window_size = 2
         self.action_horizon = 8
+        self.action_buffer = []
 
         self.model_workspace = TrainDP3Workspace.create_from_checkpoint("/home/user/kinova_flow/data/ckpts/epoch=2800-test_mean_score=-0.019.ckpt")
         self.model_workspace.model.cuda()
@@ -41,16 +44,17 @@ class FlowInference:
         ts.registerCallback(self.infer_callback)
         # for testing, create dummy input
 
-        # dummy_state = np.array([np.random.rand(self.obs_window_size, 8).astype(np.float32)])
-        # dummy_pc = np.array([np.random.rand(2, 1024, 6).astype(np.float32)])
+        dummy_state = np.array([np.random.rand(self.obs_window_size, 8).astype(np.float32)])
+        dummy_pc = np.array([np.random.rand(2, 1024, 6).astype(np.float32)])
 
-        # dummy_data = {
-        #     "agent_pos": torch.from_numpy(dummy_state).cuda(),
-        #     "point_cloud": torch.from_numpy(dummy_pc).cuda()
-        # }
+        dummy_data = {
+            "agent_pos": torch.from_numpy(dummy_state).cuda(),
+            "point_cloud": torch.from_numpy(dummy_pc).cuda()
+        }
 
-        # self.model_inference(dummy_data)
-        # exit()
+        self.model_inference(dummy_data)
+        
+        self.control_loop()
 
     def infer_callback(self, joint_msg, pc_msg):
         numpy_pc = ros_numpy.point_cloud2.pointcloud2_to_array(pc_msg)
@@ -61,7 +65,6 @@ class FlowInference:
         b = rgb_packed & 255
         rgb = np.stack([r, g, b], axis=-1).astype(np.uint8)
         points = np.concatenate([xyz, rgb], axis=-1)
-
 
         gripper_pos = 0.0 if joint_msg.position[8] < 0.1 else 1.0
         joints = np.concatenate([joint_msg.position[:7], [gripper_pos]])
@@ -74,6 +77,12 @@ class FlowInference:
         elif len(self.states) < self.obs_window_size:
             return
         
+        if len(self.action_buffer) > 0:
+            # don't do inference if we have actions to send still
+            # NOTE this probably will induce a slight delay and in future we probably
+            # want to do inference slightly before the buffer becomes empty.
+            return
+        
         state_input = np.array(self.states)
         pc_input = np.array(self.pointclouds)  # (obs_window_size, N, 6)
 
@@ -83,18 +92,44 @@ class FlowInference:
             "point_cloud": torch.from_numpy(pc_input).unsqueeze(0).cuda()
         }
 
-        rospy.loginfo(f"{data['agent_pos'].shape}, {data['point_cloud'].shape}")
+        # rospy.loginfo(f"{data['agent_pos'].shape}, {data['point_cloud'].shape}")
 
         self.model_inference(data)
         
+    def stop_robot(self):
+        self.robot.send_twist_topic(np.zeros(6))
 
     def model_inference(self, data):
         with torch.no_grad():
             action_seq = self.model_workspace.model.predict_action(data)
             action = action_seq['action']
-
+            actions = [a.cpu().numpy() for a in action.squeeze(0)]
             rounded_action = torch.round(action * 100) / 100
             rospy.loginfo(f"Predicted action sequence: {rounded_action}")
+
+        self.action_buffer.extend(actions)
+    
+    def send_safe_action(self, action):
+        # TODO: also set certain vels to 0 if close to boundaries.
+        action[:3] = np.clip(action[:3], -0.1, 0.1)  # xyz limits
+        action[3:6] = np.clip(action[3:6], -5, 5) # rpy limits
+        rospy.loginfo(f"Sending action: {action}")
+        pass
+
+    def control_loop(self):
+        rate = rospy.Rate(15)  # 15 Hz, we SHOULD have recorded demos at that frequency
+        # TODO might be better for demos to be delta positions rather than velocities tbh.
+
+        while not rospy.is_shutdown():
+            if len(self.action_buffer) == 0:
+                rospy.loginfo("Waiting for next inference...")
+                rate.sleep()
+                continue
+
+            # grab next action, and send to robot.
+            next_action = self.action_buffer.pop(0)
+            self.send_safe_action(next_action)
+            rate.sleep()
 
 
 if __name__ == "__main__":
