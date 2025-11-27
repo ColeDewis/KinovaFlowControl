@@ -154,6 +154,10 @@ class Recorder:
                 self.handleEpisodeStart()
                 self.last_press = 'start'
                 self.time_last = time.time()
+        elif msg.buttons[8] and time.time() - self.time_last > 0.5:
+            rospy.loginfo("Cancelling episode")
+            self.last_press = 'end'
+            self.time_last = time.time()
 
     # dont echo key and allow non blocking
     # def keyboardListener(self):
