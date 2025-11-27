@@ -34,7 +34,7 @@ class FlowInference:
         self.action_horizon = 8
         self.action_buffer = []
 
-        self.model_workspace = TrainDP3Workspace.create_from_checkpoint("/home/user/kinova_flow/data/ckpts/epoch=2800-test_mean_score=-0.019.ckpt")
+        self.model_workspace = TrainDP3Workspace.create_from_checkpoint("/home/user/kinova_flow/data/ckpts/bottleepoch=2600-test_mean_score=-0.010.ckpt")
         self.model_workspace.model.cuda()
 
 
@@ -116,8 +116,10 @@ class FlowInference:
         # TODO: also set certain vels to 0 if close to boundaries.
         action[:3] = np.clip(action[:3], -0.1, 0.1)  # xyz limits
         action[3:6] = np.deg2rad(np.clip(action[3:6], -5, 5))
+        action[6] = np.clip(action[6], 0, 1) * 0.5 # gripper position, scale down to not crush stuff 
         rospy.loginfo(f"Sending action: {action}")
-        self.robot.send_twist_topic(action)
+        self.robot.send_twist_topic(action[:6])
+        self.robot.send_gripper_command(action[6])
 
     def control_loop(self):
         rate = rospy.Rate(15)  # 15 Hz, we SHOULD have recorded demos at that frequency

@@ -30,4 +30,5 @@ if __name__ == "__main__":
         [0.16499872527316523, 0.5617058144781881, -3.121019201536713, -2.236882210195705, 0.1763588217323049, 1.2173782053845685, -1.674093953892454]
     )
     success = gen3.send_joint_angles(angles)
+    gen3.send_gripper_command(0.0)  # open gripper
     print("Done. Joints:", gen3.position)
