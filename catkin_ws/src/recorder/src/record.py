@@ -12,6 +12,7 @@ import tty
 import cv2
 import message_filters
 import numpy as np
+import ros_numpy
 import rospy
 import sensor_msgs.point_cloud2 as pc2
 import tf2_ros
@@ -22,7 +23,6 @@ from kortex_driver.msg._BaseCyclic_Feedback import BaseCyclic_Feedback
 from sensor_msgs.msg import Image, JointState, Joy, PointCloud2
 from std_msgs.msg import Float64, Int16
 from tqdm import tqdm
-import ros_numpy
 
 bridge = CvBridge()
 
@@ -99,12 +99,14 @@ class Recorder:
             self.curr_depth.append(points)
 
             gripper_pos = 0.0 if joint_msg.position[8] < 0.1 else 1.0
+            gripper_action = 1.0 if joint_msg.position[8] > 0.1 else 0.0
             data = {
                 # clip joints to only the main 7DOF
                 # I believe gripper is 8, should verify
                 'joints': {
                     'position': np.concatenate([joint_msg.position[:7], [gripper_pos]]),
                     'velocity': joint_msg.velocity[:7],
+                    'gripper_action': gripper_action,
                 },
                 'cartesian': {
                     "position": [
