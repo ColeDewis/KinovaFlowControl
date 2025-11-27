@@ -34,8 +34,20 @@ class FlowInference:
         self.action_horizon = 8
         self.action_buffer = []
 
-        self.model_workspace = TrainDP3Workspace.create_from_checkpoint("/home/user/kinova_flow/data/ckpts/bottleepoch=2600-test_mean_score=-0.010.ckpt")
+
+        # diff ckpts doesn't seem to make a difference here. either:
+        # - A: not enough demos for the variety of bottle positions, or
+        # - B: some inconsistency between training and inference data processing i'd guess
+        self.model_workspace = TrainDP3Workspace.create_from_checkpoint(
+            # "/home/user/kinova_flow/data/ckpts/bottleepoch=2600-test_mean_score=-0.010.ckpt"
+            # "/home/user/kinova_flow/data/ckpts/kinova_pickup_bottle-epoch=0400-test_mean_score=-0.058.ckpt"
+            # "/home/user/kinova_flow/data/ckpts/kinova_pickup_bottle-epoch=0800-test_mean_score=-0.043.ckpt"
+            "/home/user/kinova_flow/data/ckpts/kinova_pickup_bottle-epoch=1200-test_mean_score=-0.030.ckpt"
+        )
         self.model_workspace.model.cuda()
+
+        # rospy.loginfo(f"{self.model_workspace.model.normalizer}")
+        # exit()
 
 
         ts = message_filters.ApproximateTimeSynchronizer(
