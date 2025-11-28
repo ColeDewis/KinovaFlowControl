@@ -68,6 +68,7 @@ class Recorder:
 
         self.last_press = 'end'
         self.time_last = time.time()
+        self.last_data = None
     
     def __del__(self):
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.old_attrs)
@@ -84,53 +85,67 @@ class Recorder:
         if not hasattr(self, "curr_low_dim"):
             return
        
-        try:
-            numpy_pc = ros_numpy.point_cloud2.pointcloud2_to_array(pointcloud_msg)
-            xyz = ros_numpy.point_cloud2.get_xyz_points(numpy_pc, remove_nans=True)
-            rgb_packed = numpy_pc['rgb'].view(np.uint32)
-            r = (rgb_packed >> 16) & 255
-            g = (rgb_packed >> 8) & 255
-            b = rgb_packed & 255
-            rgb = np.stack([r, g, b], axis=-1).astype(np.uint8)
-            points = np.concatenate([xyz, rgb], axis=-1)
+        # try:
+        numpy_pc = ros_numpy.point_cloud2.pointcloud2_to_array(pointcloud_msg)
+        xyz = ros_numpy.point_cloud2.get_xyz_points(numpy_pc, remove_nans=True)
+        # rgb = ros_numpy.point_cloud2.split_rgb_field(numpy_pc)
+        # NOTE: with the ordered pointcloud, im not sure if this is actually
+        # correct to reshape it this way. But, it looks right in visualizer.
+        rgb_packed = numpy_pc['rgb'].view(np.uint32)
+        r = (rgb_packed >> 16) & 255
+        g = (rgb_packed >> 8) & 255
+        b = rgb_packed & 255
+        rgb = np.stack([r, g, b], axis=-1).astype(np.uint8)
+        rgb = rgb.reshape(-1, 3)
+        # rospy.loginfo(f"Pointcloud shape: {xyz.shape}, RGB shape: {rgb.shape}")
+        points = np.concatenate([xyz, rgb], axis=-1)
 
-            cv_image = bridge.imgmsg_to_cv2(img_msg, desired_encoding='bgr8')
+        cv_image = bridge.imgmsg_to_cv2(img_msg, desired_encoding='bgr8')
+
+
+        gripper_pos = 0.0 if joint_msg.position[8] < 0.1 else 1.0
+        gripper_action = 1.0 if joint_msg.position[8] > 0.1 else 0.0
+        data = {
+            # clip joints to only the main 7DOF
+            # I believe gripper is 8, should verify
+            'joints': {
+                'position': np.concatenate([joint_msg.position[:7], [gripper_pos]]),
+                'velocity': joint_msg.velocity[:7],
+                'gripper_action': gripper_action,
+            },
+            'cartesian': {
+                "position": np.array([
+                    cart_msg.base.tool_pose_x,
+                    cart_msg.base.tool_pose_y,
+                    cart_msg.base.tool_pose_z,
+                    cart_msg.base.tool_pose_theta_x,
+                    cart_msg.base.tool_pose_theta_y,
+                    cart_msg.base.tool_pose_theta_z,
+                ]),
+                "velocity": np.array([
+                    cart_msg.base.tool_twist_linear_x,
+                    cart_msg.base.tool_twist_linear_y,
+                    cart_msg.base.tool_twist_linear_z,
+                    cart_msg.base.tool_twist_angular_x,
+                    cart_msg.base.tool_twist_angular_y,
+                    cart_msg.base.tool_twist_angular_z,
+                ]),
+            },
+        }
+        
+
+        if self.last_data: 
+            data['joints']['delta'] = data['joints']['position'] - self.last_data['joints']['position']
+            data['cartesian']['delta'] = data['cartesian']['position'] - self.last_data['cartesian']['position']
+
+            self.curr_low_dim.append(data)
             self.curr_rgb.append(cv_image)
             self.curr_depth.append(points)
+        
+        self.last_data = data
 
-            gripper_pos = 0.0 if joint_msg.position[8] < 0.1 else 1.0
-            gripper_action = 1.0 if joint_msg.position[8] > 0.1 else 0.0
-            data = {
-                # clip joints to only the main 7DOF
-                # I believe gripper is 8, should verify
-                'joints': {
-                    'position': np.concatenate([joint_msg.position[:7], [gripper_pos]]),
-                    'velocity': joint_msg.velocity[:7],
-                    'gripper_action': gripper_action,
-                },
-                'cartesian': {
-                    "position": [
-                        cart_msg.base.tool_pose_x,
-                        cart_msg.base.tool_pose_y,
-                        cart_msg.base.tool_pose_z,
-                        cart_msg.base.tool_pose_theta_x,
-                        cart_msg.base.tool_pose_theta_y,
-                        cart_msg.base.tool_pose_theta_z,
-                    ],
-                    "velocity": [
-                        cart_msg.base.tool_twist_linear_x,
-                        cart_msg.base.tool_twist_linear_y,
-                        cart_msg.base.tool_twist_linear_z,
-                        cart_msg.base.tool_twist_angular_x,
-                        cart_msg.base.tool_twist_angular_y,
-                        cart_msg.base.tool_twist_angular_z,
-                    ],
-                },
-            }
-            
-            self.curr_low_dim.append(data)
-        except Exception as e:
-            rospy.logerr("error in sync: %s", e)
+        # except Exception as e:
+        #     rospy.logerr("error in sync: %s", e)
    
     def checkDesync(self, event):
         now = rospy.Time.now()
@@ -209,9 +224,11 @@ class Recorder:
     def handleEpisodeStart(self):
         rospy.loginfo("Starting episode " + str(self.episode_num))
         self.last_sync_time = rospy.Time.now()
+        self.start_time = rospy.Time.now()
         self.curr_low_dim = []
         self.curr_depth = []
         self.curr_rgb = []
+        self.last_data = None
    
     def handleEpisodeEnd(self):
         rospy.loginfo(f"Episode {self.episode_num} recorded")
@@ -225,11 +242,14 @@ class Recorder:
             frame_folder = os.path.join(current_folder, str(i))
             os.makedirs(frame_folder, exist_ok=True)
             np.save(os.path.join(frame_folder, "low_dim.npy"), self.curr_low_dim[idx])
+            # print("JOINTS", self.curr_low_dim[idx]['joints']['delta'])
+            # print("CARTESIAN", self.curr_low_dim[idx]['cartesian']['delta'])
             np.save(os.path.join(frame_folder, "rgb.npy"), self.curr_rgb[idx])
             # TODO calibrate extrinsics...
             np.save(os.path.join(frame_folder, "depth.npy"), preprocess_point_cloud(self.curr_depth[idx]))
 
         rospy.loginfo(f"Finished saving episode {self.episode_num}")
+        rospy.loginfo(f"Collected over {(rospy.Time.now() - self.start_time).to_sec()} seconds, {len(self.curr_low_dim)} frames.")
         self.episode_num += 1
 
     # IF we need to subsample we can use this function. Otherwise don't use.

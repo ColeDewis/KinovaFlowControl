@@ -10,7 +10,9 @@ from flow_inference.HumanScoredFlowMatching.scripts.convert_real_robot_data impo
     preprocess_point_cloud
 from kortex_bringup import KinovaGen3
 from sensor_msgs.msg import Image, JointState, PointCloud2
+import cv_bridge
 
+bridge = cv_bridge.CvBridge()
 
 class FlowInference:
     def __init__(self):
@@ -24,12 +26,13 @@ class FlowInference:
         joints_subscriber = message_filters.Subscriber(
             "/my_gen3/joint_states", JointState
         )
-        # self.image_subscriber = message_filters.Subscriber(
-        #     "/camera1/color/image_raw", Image
-        # )
+        image_subscriber = message_filters.Subscriber(
+            "/camera1/color/image_raw", Image
+        )
 
         self.states = []
         self.pointclouds = []
+        self.imgs = []
         self.obs_window_size = 2
         self.action_horizon = 8
         self.action_buffer = []
@@ -38,20 +41,33 @@ class FlowInference:
         # diff ckpts doesn't seem to make a difference here. either:
         # - A: not enough demos for the variety of bottle positions, or
         # - B: some inconsistency between training and inference data processing i'd guess
+        # pretty sure its B; even with much easier bottle placements, its still doing things
+        # that don't line up with observations. probably an inconsistency... 
+        # will also try loading the model with the config explictly to see if that changes anything.
         self.model_workspace = TrainDP3Workspace.create_from_checkpoint(
             # "/home/user/kinova_flow/data/ckpts/bottleepoch=2600-test_mean_score=-0.010.ckpt"
             # "/home/user/kinova_flow/data/ckpts/kinova_pickup_bottle-epoch=0400-test_mean_score=-0.058.ckpt"
             # "/home/user/kinova_flow/data/ckpts/kinova_pickup_bottle-epoch=0800-test_mean_score=-0.043.ckpt"
-            "/home/user/kinova_flow/data/ckpts/kinova_pickup_bottle-epoch=1200-test_mean_score=-0.030.ckpt"
+            # "/home/user/kinova_flow/data/ckpts/kinova_pickup_bottle-epoch=1200-test_mean_score=-0.030.ckpt"
+            # "/home/user/kinova_flow/data/ckpts/easy_kinova_pickup_bottle-epoch=0200-test_mean_score=-0.110.ckpt",
+            "/home/user/kinova_flow/data/ckpts/easy_kinova_pickup_bottle-epoch=0400-test_mean_score=-0.080.ckpt"
+            # "/home/user/kinova_flow/data/ckpts/easy_kinova_pickup_bottle-epoch=0600-test_mean_score=-0.063.ckpt"
+            # "/home/user/kinova_flow/data/ckpts/imgs_easy_kinova_pickup_bottle-epoch=0350-test_mean_score=-0.069.ckpt"
+            # "/home/user/kinova_flow/data/ckpts/imgs_easy_kinova_pickup_bottle-epoch=0200-test_mean_score=-0.091.ckpt"
         )
+        self.model_workspace.model.eval()
         self.model_workspace.model.cuda()
 
-        # rospy.loginfo(f"{self.model_workspace.model.normalizer}")
+        # rospy.loginfo(f"{self.model_workspace.model.normalizer.get_input_stats()}")
+        # rospy.loginfo(f"{self.model_workspace.model.normalizer.params_dict['agent_pos']['offset']}")
+        # rospy.loginfo(f"{self.model_workspace.model.normalizer.get_input_stats()['point_cloud']['max']}")
+        # rospy.loginfo(f"{self.model_workspace.model.normalizer.get_input_stats()['point_cloud']['min']}")
+        # rospy.loginfo(f"{self.model_workspace.model.normalizer.get_output_stats()}")
         # exit()
 
 
         ts = message_filters.ApproximateTimeSynchronizer(
-            [joints_subscriber, pc_subscriber], queue_size=10, slop=0.5
+            [joints_subscriber, pc_subscriber, image_subscriber], queue_size=1, slop=0.5
         )
         ts.registerCallback(self.infer_callback)
         # for testing, create dummy input
@@ -68,7 +84,7 @@ class FlowInference:
         
         self.control_loop()
 
-    def infer_callback(self, joint_msg, pc_msg):
+    def infer_callback(self, joint_msg, pc_msg, img_msg):
         numpy_pc = ros_numpy.point_cloud2.pointcloud2_to_array(pc_msg)
         xyz = ros_numpy.point_cloud2.get_xyz_points(numpy_pc, remove_nans=True)
         rgb_packed = numpy_pc['rgb'].view(np.uint32)
@@ -81,30 +97,37 @@ class FlowInference:
         gripper_pos = 0.0 if joint_msg.position[8] < 0.1 else 1.0
         joints = np.concatenate([joint_msg.position[:7], [gripper_pos]])
 
+        img = bridge.imgmsg_to_cv2(img_msg, desired_encoding='bgr8')
+        self.imgs.append(img)
+
         self.states.append(joints)
         self.pointclouds.append(preprocess_point_cloud(points))
         if len(self.states) > self.obs_window_size:
             self.states.pop(0)
             self.pointclouds.pop(0)
+            self.imgs.pop(0)
         elif len(self.states) < self.obs_window_size:
             return
         
         # empirically 2 seems to be needed in order for it to not lag behind
-        if len(self.action_buffer) > 2:
+        if len(self.action_buffer) > 0:
             # don't do inference if we have actions to send still
             # NOTE 2 is kinda heuristic, but seems roughly correct
             return
         
         state_input = np.array(self.states)
         pc_input = np.array(self.pointclouds)  # (obs_window_size, N, 6)
+        imgs = np.array(self.imgs)
 
         self.model_workspace.model.eval()
         data = {
             "agent_pos": torch.from_numpy(state_input).unsqueeze(0).cuda(), 
-            "point_cloud": torch.from_numpy(pc_input).unsqueeze(0).cuda()
+            "point_cloud": torch.from_numpy(pc_input).unsqueeze(0).cuda(),
+            # "img": torch.from_numpy(imgs).unsqueeze(0).cuda()
         }
 
         # rospy.loginfo(f"{data['agent_pos'].shape}, {data['point_cloud'].shape}")
+        # rospy.loginfo(f'{data["point_cloud"][:, :, :, :3].shape} {data["point_cloud"][:, :, :, :3].min().item()}, {data["point_cloud"][:, :, :, :3].max().item()}')
 
         self.model_inference(data)
         
@@ -121,16 +144,25 @@ class FlowInference:
             # rospy.loginfo(f"Predicted action sequence: {rounded_action}")
 
         # clear buffer so we never execute an old action sequence
-        self.action_buffer = []
+        # self.action_buffer = []
         self.action_buffer.extend(actions)
+        self.action_buffer = [
+            self.action_buffer[0], 
+            self.action_buffer[1], 
+            self.action_buffer[2],
+            self.action_buffer[3],
+            # self.action_buffer[4],
+            # self.action_buffer[5],
+        ]
     
     def send_safe_action(self, action):
         # TODO: also set certain vels to 0 if close to boundaries.
         action[:3] = np.clip(action[:3], -0.1, 0.1)  # xyz limits
         action[3:6] = np.deg2rad(np.clip(action[3:6], -5, 5))
-        action[6] = np.clip(action[6], 0, 1) * 0.5 # gripper position, scale down to not crush stuff 
+        action[6] = np.clip(action[6], 0, 1)  #* 0.5 # gripper position, scale down to not crush stuff 
+        action[6] = 0.0 if action[6] < 0.5 else 0.5
         rospy.loginfo(f"Sending action: {action}")
-        self.robot.send_twist_topic(action[:6])
+        self.robot.send_twist_topic(action[:6] * 0.7)
         self.robot.send_gripper_command(action[6])
 
     def control_loop(self):

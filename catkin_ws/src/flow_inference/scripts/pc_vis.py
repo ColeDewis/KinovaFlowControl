@@ -32,6 +32,7 @@ class PCVis:
         g = (rgb_packed >> 8) & 255
         b = rgb_packed & 255
         rgb = np.stack([r, g, b], axis=-1).astype(np.uint8)
+        rgb = rgb.reshape(-1, 3)
         points = np.concatenate([xyz, rgb], axis=-1)
         points = preprocess_point_cloud(points)
         try:
