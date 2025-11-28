@@ -4,6 +4,7 @@ import time
 from math import degrees, radians
 
 import numpy as np
+import actionlib
 import rospy
 from kortex_driver.msg import *
 from kortex_driver.srv import *
@@ -205,6 +206,10 @@ class KinovaGen3(object):
             self.validate_waypoint_list = rospy.ServiceProxy(
                 validate_waypoint_list_full_name, ValidateWaypointList
             )
+
+            self.cart_traj_client = actionlib.SimpleActionClient('/' + self.robot_name + '/cartesian_trajectory_controller/follow_cartesian_trajectory', kortex_driver.msg.FollowCartesianTrajectoryAction)
+
+            self.cart_traj_client.wait_for_server()
 
         except rospy.ServiceException:
             rospy.logerr("Failed to initialize Kinova Gen3 services!")
@@ -588,6 +593,62 @@ class KinovaGen3(object):
 
         self._wait_for_action_end_or_abort()
         return True
+
+
+    def _fill_cartesian_waypoint(self, x, y, z, theta_x, theta_y, theta_z, blending_radius=0.1):
+        cartesianWaypoint = CartesianWaypoint()
+
+        cartesianWaypoint.pose.x = x
+        cartesianWaypoint.pose.y = y
+        cartesianWaypoint.pose.z = z
+        cartesianWaypoint.pose.theta_x = theta_x
+        cartesianWaypoint.pose.theta_y = theta_y
+        cartesianWaypoint.pose.theta_z = theta_z
+        cartesianWaypoint.reference_frame = CartesianReferenceFrame.CARTESIAN_REFERENCE_FRAME_BASE
+        cartesianWaypoint.blending_radius = blending_radius
+       
+        return cartesianWaypoint
+
+    def send_poses(
+        self,
+        poses: list,
+    ):
+        """
+        DOESNT WORK YET
+        Sends a list of poses to the gen3 relative to the base link
+
+        Args:
+            poses (list): list of poses, each pose is a list of 6 floats (x,y,z,theta_x,theta_y,theta_z)
+
+        Returns:
+            bool: true/false depending on whether the command succeeded
+        """
+        self.last_action_notif_type = None
+
+        goal = FollowCartesianTrajectoryGoal()
+
+        for pose in poses:
+            waypoint = self._fill_cartesian_waypoint(
+                pose[0],
+                pose[1],
+                pose[2],
+                np.deg2rad(pose[3]),
+                np.deg2rad(pose[4]),
+                np.deg2rad(pose[5]),
+                blending_radius=0.0
+            )
+            goal.trajectory.append(waypoint)
+
+        # Call the service
+        rospy.loginfo("Sending goal(Cartesian waypoint) to action server...")
+        try:
+            self.cart_traj_client.send_goal(goal)
+        except rospy.ServiceException:
+            rospy.logerr("Failed to send goal.")
+            return False
+        else:
+            self.cart_traj_client.wait_for_result()
+            return True
 
     # #####
     # Gripper Control
